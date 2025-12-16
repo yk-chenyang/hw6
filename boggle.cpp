@@ -95,5 +95,18 @@ bool boggleHelper(const std::set<std::string>& dict, const std::set<std::string>
 								   std::string word, std::set<std::string>& result, unsigned int r, unsigned int c, int dr, int dc)
 {
 //add your solution here!
-
+  if(r>=board.size()||c>=board.size()){
+    return false; //check for boundary
+  }
+  word+=board[r][c]; //update word
+  if(prefix.find(word)==prefix.end() && dict.find(word)==dict.end()){
+    return false; //early pruning. we also use it to check if moving further would give us valid words
+  }
+  bool hasLonger = boggleHelper(dict, prefix, board, word, result, r+dr, c+dc, dr, dc); //recurse
+  bool isWord =  dict.find(word)!=dict.end();
+  if(hasLonger==false && isWord){ //ours is the best
+    result.insert(word);
+    return true; //update and return
+  }
+  return hasLonger; //if we could move forward
 }
