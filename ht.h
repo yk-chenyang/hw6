@@ -35,7 +35,7 @@ struct LinearProber : public Prober<KeyType> {
     {
         // Complete the condition below that indicates failure
         // to find the key or an empty slot
-        if( /* Fill me in */ ) {
+        if(this->numProbes_>=this->m_) { //this means we've tried all possible places and nothing is a valid open space
             return this->npos; 
         }
         HASH_INDEX_T loc = (this->start_ + this->numProbes_) % this->m_;
@@ -102,9 +102,12 @@ public:
     // To be completed
     HASH_INDEX_T next() 
     {
-
-
-
+        if(this->numProbes_>=this->m_) { //this means we've tried all possible places and nothing is a valid open space. This condition is the same as linear because (this->numProbes_)*(dhstep_) still map to different locations, restricted by m_
+            return this->npos; 
+        }
+        HASH_INDEX_T loc = (this->start_ + (this->numProbes_)*(dhstep_)) % this->m_; //stepping for double hashing
+        this->numProbes_++;
+        return loc;
     }
 };
 
@@ -270,7 +273,9 @@ private:
     HASH_INDEX_T mIndex_;  // index to CAPACITIES
 
     // ADD MORE DATA MEMBERS HERE, AS NECESSARY
-
+    double resizeAlpha_; //tracking the resize trigger loading factor resizeAlpha
+    size_t size_; //this is the FAKE BUT REAL size that does not include "deleted" items but only non-deleted items. We want to keep track of this because of our tricky setup
+    size_t totalOccupied_; //this includes the tombstones
 };
 
 // ----------------------------------------------------------------------------
@@ -293,43 +298,73 @@ HashTable<K,V,Prober,Hash,KEqual>::HashTable(
        :  hash_(hash), kequal_(kequal), prober_(prober)
 {
     // Initialize any other data members as necessary
-
+    totalProbes_ = 0;
+    resizeAlpha_ = resizeAlpha;
+    size_ = 0;
+    totalOccupied_ = 0;
+    mIndex_ = 0; //setting all default/starting values of our other data members
+    table_.resize(CAPACITIES[mIndex_],NULL); //initialize the table with the first size we would want, 11
 }
 
 // To be completed
 template<typename K, typename V, typename Prober, typename Hash, typename KEqual>
 HashTable<K,V,Prober,Hash,KEqual>::~HashTable()
 {
-
+    for(std::size_t i=0; i<table_.size(); i++){ //here we care about the physical size() because we're going to delete them all anyways
+        delete table_[i];
+    }
 }
 
 // To be completed
 template<typename K, typename V, typename Prober, typename Hash, typename KEqual>
 bool HashTable<K,V,Prober,Hash,KEqual>::empty() const
 {
-
+    if(size_==0){
+        return true;
+    }
+    return false;
 }
 
 // To be completed
 template<typename K, typename V, typename Prober, typename Hash, typename KEqual>
 size_t HashTable<K,V,Prober,Hash,KEqual>::size() const
 {
-
+    return size_;
 }
 
 // To be completed
 template<typename K, typename V, typename Prober, typename Hash, typename KEqual>
 void HashTable<K,V,Prober,Hash,KEqual>::insert(const ItemType& p)
 {
-
-
+    //before inserting an element, we may need to resize if the loading factor exceeds alpha
+    double currentLoad = ((double)(totalOccupied_))/CAPACITIES[mIndex_]; //we need to include the tombstones for the loading factor
+    if(currentLoad>=resizeAlpha_){
+        resize();
+    }
+    HASH_INDEX_T idx = probe(p.first); //p is a standard key, value pair, so we want to hash p.first
+    if(idx==npos){
+        throw std::logic_error("No Location Available!");
+    }
+    //we can assume that by this point we have an index where we can safely hash the object
+    if(table_[idx]==NULL){ //empty. We should allocate a new item and place it there
+        table_[idx]=new HashItem(p); //allocate a new item
+        size_++;
+        totalOccupied_++; //both "sizes" should increase
+    }
+    else{ //just overwrite the value of that existing key
+        (table_[idx]->item).second = p.second; 
+    }
 }
 
 // To be completed
 template<typename K, typename V, typename Prober, typename Hash, typename KEqual>
 void HashTable<K,V,Prober,Hash,KEqual>::remove(const KeyType& key)
 {
-
+    HashItem* temp = internalFind(key); 
+    if(temp!=NULL && temp->deleted==false){
+        temp->deleted = true; //this would be the way we delete it
+        size_--; //here we would only decrease the nominal size, because the physical occupied size actually has not been changed
+    }
 
 }
 
@@ -404,8 +439,22 @@ typename HashTable<K,V,Prober,Hash,KEqual>::HashItem* HashTable<K,V,Prober,Hash,
 template<typename K, typename V, typename Prober, typename Hash, typename KEqual>
 void HashTable<K,V,Prober,Hash,KEqual>::resize()
 {
+    std::vector<HashItem*> prevTable = table_; //using the copy constructor. So this copies all content of the previous table to a temp storage, instead of pointing to the same address
+    table_.clear(); //clearing the original HashTable
+    mIndex_++; //we need to use the next size available
+    table_.resize(CAPACITIES[mIndex_],NULL);
+    size_ = 0;
+    totalOccupied_ = 0; //reset those "sizes" back to 0
+    //now we need to put those values back to our new table
+    for(size_t i=0; i<prevTable.size(); i++){
+        if(prevTable[i]!=NULL){
+            if((prevTable[i]->deleted)==false){
+                insert(prevTable[i]->item); //if the item is not dead, we would want to insert it to our new table
+            }
+            delete prevTable[i]; //we would delete the item if it's not already NULL
+        }
+    } //so we have deleted all elements to delete AND updated the new table in this loop
 
-    
 }
 
 // Almost complete
@@ -424,7 +473,7 @@ HASH_INDEX_T HashTable<K,V,Prober,Hash,KEqual>::probe(const KeyType& key) const
         }
         // fill in the condition for this else if statement which should 
         // return 'loc' if the given key exists at this location
-        else if(/* Fill me in */) {
+        else if((table_[loc]->deleted)==false && kequal_((table_[loc]->item).first,key)==true) { //at this point we know it's not NULL
             return loc;
         }
         loc = prober_.next();
